@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using MirrorOculusP2P;
+using Mirror;
 using Oculus.Platform;
 using Oculus.Platform.Models;
 using UnityEngine;
@@ -16,7 +16,7 @@ public class OculusPeer
     private ulong _remoteID;
     private PeerConnectionState _state = PeerConnectionState.Unknown;
     public Action OnConnected;
-    public Action<ArraySegment<byte>> OnData;
+    public Action<ArraySegment<byte>, int> OnData;
     public Action OnDisconnected;
 
     public bool Connected => _state == PeerConnectionState.Connected;
@@ -93,7 +93,7 @@ public class OculusPeer
         }
     }
 
-    public void Send(ArraySegment<byte> data, OculusChannel channel)
+    public void Send(int channelId, ArraySegment<byte> data)
     {
         if (data.Count == 0)
         {
@@ -104,13 +104,17 @@ public class OculusPeer
 
         if (_state == PeerConnectionState.Connected)
         {
-            switch (channel)
+            switch (channelId)
             {
-                case OculusChannel.Reliable:
+                case Channels.Reliable:
                     SendPacket(_remoteID, data, SendPolicy.Reliable);
                     break;
-                case OculusChannel.Unreliable:
+                case Channels.Unreliable:
                     SendPacket(_remoteID, data, SendPolicy.Unreliable);
+                    break;
+                default:
+                    OculusLogWarning($"Channel id not known ({channelId}), defaulting to reliable");
+                    SendPacket(_remoteID, data, SendPolicy.Reliable);
                     break;
             }
         }
@@ -157,12 +161,32 @@ public class OculusPeer
 
     public void ProcessPacket(Packet packet)
     {
+        if (packet.Size > ReliableMaxMessageSize)
+        {
+            OculusLogError("Packet too big before type-cast");
+        }
+
         var msgLength = (int) packet.Size;
         if (msgLength <= ReliableMaxMessageSize)
         {
             packet.ReadBytes(_receiveBuffer);
             var message = new ArraySegment<byte>(_receiveBuffer, 0, msgLength);
-            OnData.Invoke(message);
+            int channelId;
+            switch (packet.Policy)
+            {
+                case SendPolicy.Unreliable:
+                    channelId = Channels.Unreliable;
+                    break;
+                case SendPolicy.Reliable:
+                    channelId = Channels.Reliable;
+                    break;
+                default:
+                    OculusLogWarning("SendPolicy unknown, defaulting to reliable");
+                    channelId = Channels.Reliable;
+                    break;
+            }
+
+            OnData.Invoke(message, channelId);
         }
         else
         {

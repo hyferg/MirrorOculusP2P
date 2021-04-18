@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using MirrorOculusP2P;
 using Oculus.Platform;
 using Oculus.Platform.Models;
 using UnityEngine;
@@ -13,7 +12,7 @@ public class OculusServer
     private List<Packet> _reliablePackets = new List<Packet>();
 
     public Action<int> OnConnected;
-    public Action<int, ArraySegment<byte>> OnData;
+    public Action<int, ArraySegment<byte>, int> OnData;
     public Action<int> OnDisconnected;
 
     public OculusServer()
@@ -50,7 +49,7 @@ public class OculusServer
             connection = new OculusPeer();
             OculusLog($"Server added connection ({connectionId}): {msg.Data.ID}");
             connection.OnConnected = () => { OnConnected.Invoke(connectionId); };
-            connection.OnData = message => { OnData.Invoke(connectionId, message); };
+            connection.OnData = (message, channelId) => { OnData.Invoke(connectionId, message, channelId); };
             connection.OnDisconnected = () =>
             {
                 Connections.Remove(connectionId);
@@ -85,11 +84,11 @@ public class OculusServer
         }
     }
 
-    public void Send(int connectionId, OculusChannel channelId, ArraySegment<byte> segment)
+    public void Send(int connectionId, int channelId, ArraySegment<byte> segment)
     {
         if (Connections.TryGetValue(connectionId, out var connection))
         {
-            connection.Send(segment, channelId);
+            connection.Send(channelId, segment);
         }
         else
         {
@@ -129,6 +128,7 @@ public class OculusServer
     {
         if (_reliablePackets.Count > 0)
         {
+            OculusLog($"{_reliablePackets.Count} reliable packets in queue");
             var oldPackets = new List<Packet>();
             foreach (var reliablePacket in _reliablePackets)
             {

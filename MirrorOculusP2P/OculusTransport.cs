@@ -2,8 +2,6 @@
 using Mirror;
 using Oculus.Platform.Samples.VrVoiceChat;
 using UnityEngine;
-using UnityEngine.Rendering.PostProcessing;
-using MirrorOculusP2P;
 
 public class OculusTransport : Transport
 {
@@ -19,13 +17,13 @@ public class OculusTransport : Transport
             _client = new OculusClient
             {
                 OnConnected = () => OnClientConnected.Invoke(),
-                OnData = message => { OnClientDataReceived.Invoke(message, Channels.Reliable); },
+                OnData = (message, channelId) => { OnClientDataReceived.Invoke(message, channelId); },
                 OnDisconnected = () => OnClientDisconnected.Invoke()
             };
             _server = new OculusServer
             {
                 OnConnected = connectionId => { OnServerConnected.Invoke(connectionId); },
-                OnData = (connectionId, message) => { OnServerDataReceived.Invoke(connectionId, message, Channels.Reliable); },
+                OnData = (connectionId, message, channelId) => { OnServerDataReceived.Invoke(connectionId, message, channelId); },
                 OnDisconnected = connectionId => { OnServerDisconnected.Invoke(connectionId); }
             };
 
@@ -63,15 +61,7 @@ public class OculusTransport : Transport
 
     public override void ClientSend(int channelId, ArraySegment<byte> segment)
     {
-        switch (channelId)
-        {
-            case Channels.Unreliable:
-                _client.Send(segment, OculusChannel.Unreliable);
-                break;
-            default:
-                _client.Send(segment, OculusChannel.Reliable);
-                break;
-        }
+        _client.Send(channelId, segment);
     }
 
     public override void ClientDisconnect()
@@ -112,15 +102,7 @@ public class OculusTransport : Transport
 
     public override void ServerSend(int connectionId, int channelId, ArraySegment<byte> segment)
     {
-        switch (channelId)
-        {
-            case Channels.Unreliable:
-                _server.Send(connectionId, OculusChannel.Unreliable, segment);
-                break;
-            default:
-                _server.Send(connectionId, OculusChannel.Reliable, segment);
-                break;
-        }
+        _server.Send(connectionId, channelId, segment);
     }
 
     public override bool ServerDisconnect(int connectionId)

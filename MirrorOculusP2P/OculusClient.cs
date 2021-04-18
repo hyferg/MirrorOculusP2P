@@ -1,5 +1,4 @@
 ﻿using System;
-using MirrorOculusP2P;
 using UnityEngine;
 
 public class OculusClient
@@ -8,7 +7,7 @@ public class OculusClient
     public bool Connected;
 
     public Action OnConnected;
-    public Action<ArraySegment<byte>> OnData;
+    public Action<ArraySegment<byte>, int> OnData;
     public Action OnDisconnected;
 
     public static bool CanParseId(string userIDStr)
@@ -41,7 +40,7 @@ public class OculusClient
                 Connected = true;
                 OnConnected.Invoke();
             },
-            OnData = message => { OnData.Invoke(message); },
+            OnData = (message, channelId) => { OnData.Invoke(message, channelId); },
             OnDisconnected = () =>
             {
                 OculusLog("OnClientDisconnected");
@@ -50,7 +49,7 @@ public class OculusClient
                 OnDisconnected.Invoke();
             }
         };
-
+        
         try
         {
             var userID = ulong.Parse(userIDStr);
@@ -62,11 +61,11 @@ public class OculusClient
         }
     }
 
-    public void Send(ArraySegment<byte> segment, OculusChannel channel)
+    public void Send(int channelId, ArraySegment<byte> segment)
     {
         if (Connected)
         {
-            _connection.Send(segment, channel);
+            _connection.Send(channelId, segment);
         }
         else
         {
