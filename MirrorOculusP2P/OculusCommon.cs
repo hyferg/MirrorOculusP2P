@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Net.Sockets;
-using Mirror;
-using Oculus.Platform;
-using Oculus.Platform.Models;
+﻿using Oculus.Platform;
 using UnityEngine;
 
 namespace Mirror.OculusP2P

@@ -20,28 +20,6 @@ namespace Mirror.OculusP2P
         private ulong HostID;
         private List<Action> BufferedData;
 
-        public void Ping()
-        {
-            Net.Ping(HostID).OnComplete(a =>
-            {
-                if (a.IsError)
-                {
-                    OculusLogWarning(a.GetError().Message);
-                }
-                else
-                {
-                    if (a.Data.IsTimeout)
-                    {
-                        OculusLogWarning("Timeout");
-                    }
-                    else
-                    {
-                        OculusLog($"Ping {a.Data.PingTimeUsec}");
-                    }
-                }
-            });
-        }
-
         private OculusClient()
         {
             BufferedData = new List<Action>();
@@ -96,7 +74,7 @@ namespace Mirror.OculusP2P
         {
             // OnConnectionFailed();
 
-            Debug.Log($"Connection state changed: {message.Data.State}");
+            OculusLog($"Connection state changed: {message.Data.State}");
             switch (message.Data.State)
             {
                 case PeerConnectionState.Unknown:
@@ -104,11 +82,11 @@ namespace Mirror.OculusP2P
                 case PeerConnectionState.Connected:
                     Connected = true;
                     OnConnected.Invoke();
-                    Debug.Log("Connection established.");
+                    OculusLog("Connection established.");
 
                     if (BufferedData.Count > 0)
                     {
-                        Debug.Log($"{BufferedData.Count} received before connection was established. Processing now.");
+                        OculusLog($"{BufferedData.Count} received before connection was established. Processing now.");
                         {
                             foreach (Action a in BufferedData)
                             {
@@ -132,7 +110,7 @@ namespace Mirror.OculusP2P
 
             if (Net.IsConnected(HostID))
             {
-                Debug.Log("Sending Disconnect message");
+                OculusLog("Sending Disconnect message");
                 Net.Close(HostID);
             }
         }
@@ -147,7 +125,7 @@ namespace Mirror.OculusP2P
         {
             Connected = false;
             OnDisconnected.Invoke();
-            Debug.Log("Disconnected.");
+            OculusLog("Disconnected.");
             Net.Close(HostID);
         }
 

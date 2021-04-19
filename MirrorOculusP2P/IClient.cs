@@ -11,6 +11,5 @@
     void FlushData();
     void Send(byte[] data, int channelId);
     
-    void Ping();
   }
 }

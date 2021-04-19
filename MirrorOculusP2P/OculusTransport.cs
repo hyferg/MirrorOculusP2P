@@ -9,24 +9,9 @@ namespace Mirror.OculusP2P
     public class OculusTransport : Transport
     {
         private User _user;
-        private const string STEAM_SCHEME = "steam";
 
         private static IClient client;
         private static IServer server;
-
-        private float _lastPing;
-
-        public void Update()
-        {
-            if (ClientActive())
-            {
-                if (Time.realtimeSinceStartup - _lastPing > 0.3)
-                {
-                    _lastPing = Time.realtimeSinceStartup;
-                    client.Ping();
-                }
-            }
-        }
 
         public void LoggedIn(User user)
         {
@@ -71,7 +56,7 @@ namespace Mirror.OculusP2P
         {
             if (!Core.IsInitialized())
             {
-                Debug.LogError("SteamWorks not initialized. Client could not be started.");
+                Debug.LogError("Oculus not initialized. Client could not be started.");
                 OnClientDisconnected.Invoke();
                 return;
             }
@@ -84,21 +69,13 @@ namespace Mirror.OculusP2P
 
             if (!ClientActive() || client.Error)
             {
-                Debug.Log($"Starting client [SteamSockets], target address {address}.");
+                Debug.Log($"Starting client [Oculus], target address {address}.");
                 client = OculusClient.CreateClient(this, address);
             }
             else
             {
                 Debug.LogError("Client already running!");
             }
-        }
-
-        public override void ClientConnect(Uri uri)
-        {
-            if (uri.Scheme != STEAM_SCHEME)
-                throw new ArgumentException($"Invalid url {uri}, use {STEAM_SCHEME}://SteamID instead", nameof(uri));
-
-            ClientConnect(uri.Host);
         }
 
         public override void ClientSend(int channelId, ArraySegment<byte> segment)
@@ -124,7 +101,7 @@ namespace Mirror.OculusP2P
         {
             if (!Core.IsInitialized())
             {
-                Debug.LogError("SteamWorks not initialized. Server could not be started.");
+                Debug.LogError("Oculus not initialized. Server could not be started.");
                 return;
             }
 
@@ -136,7 +113,7 @@ namespace Mirror.OculusP2P
 
             if (!ServerActive())
             {
-                Debug.Log($"Starting server [SteamSockets].");
+                Debug.Log($"Starting server [Oculus].");
                 server = OculusServer.CreateServer(this, NetworkManager.singleton.maxConnections);
             }
             else
