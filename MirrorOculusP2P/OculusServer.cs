@@ -1,279 +1,188 @@
 ﻿using System;
-using System.Collections.Generic;
 using Oculus.Platform;
 using Oculus.Platform.Models;
-using UnityEngine;
+using Debug = UnityEngine.Debug;
 
-public class OculusServer
+namespace Mirror.OculusP2P
 {
-    private readonly Dictionary<int, OculusPeer> Connections = new Dictionary<int, OculusPeer>();
-    private bool _active;
-    private bool _paused;
-    private List<Packet> _reliablePackets = new List<Packet>();
-
-    public Action<int> OnConnected;
-    public Action<int, ArraySegment<byte>, int> OnData;
-    public Action<int> OnDisconnected;
-
-    public OculusServer()
+    public class OculusServer : OculusCommon, IServer
     {
-        Net.SetPeerConnectRequestCallback(PeerConnectRequestCallback);
-    }
+        private event Action<int> OnConnected;
+        private event Action<int, byte[], int> OnReceivedData;
+        private event Action<int> OnDisconnected;
+        private event Action<int, Exception> OnReceivedError;
 
-    public bool IsActive()
-    {
-        return true;
-    }
+        private readonly BidirectionalDictionary<ulong, int> _oculusIDToMirrorID;
+        private readonly int _maxConnections;
+        private int _nextConnectionID;
 
-    public void Start()
-    {
-        _active = true;
-        _reliablePackets.Clear();
-        OculusPeer.DisposeAllPackets();
-        Net.SetPeerConnectRequestCallback(PeerConnectRequestCallback);
-        Net.SetConnectionStateChangedCallback(ConnectionStateChangedCallback);
-    }
-
-    private int GetConnectionID(ulong id)
-    {
-        return id.GetHashCode();
-    }
-
-    private void PeerConnectRequestCallback(Message<NetworkingPeer> msg)
-    {
-        OculusLog($"Connection state to {msg.Data.ID} changed to {msg.Data.State}");
-
-        var connectionId = GetConnectionID(msg.Data.ID);
-        if (!Connections.TryGetValue(connectionId, out var connection))
+        private OculusServer(int maxConnections)
         {
-            connection = new OculusPeer();
-            OculusLog($"Server added connection ({connectionId}): {msg.Data.ID}");
-            connection.OnConnected = () => { OnConnected.Invoke(connectionId); };
-            connection.OnData = (message, channelId) => { OnData.Invoke(connectionId, message, channelId); };
-            connection.OnDisconnected = () =>
+            _maxConnections = maxConnections;
+            _oculusIDToMirrorID = new BidirectionalDictionary<ulong, int>();
+            _nextConnectionID = 1;
+            Net.SetPeerConnectRequestCallback(OnPeerConnectRequest);
+            Net.SetConnectionStateChangedCallback(OnConnectionStatusChanged);
+        }
+
+        public static OculusServer CreateServer(OculusTransport transport, int maxConnections)
+        {
+            OculusServer s = new OculusServer(maxConnections);
+
+            s.OnConnected += (id) => transport.OnServerConnected.Invoke(id);
+            s.OnDisconnected += (id) => transport.OnServerDisconnected.Invoke(id);
+            s.OnReceivedData += (id, data, ch) => transport.OnServerDataReceived.Invoke(id, new ArraySegment<byte>(data), ch);
+            s.OnReceivedError += (id, exception) => transport.OnServerError.Invoke(id, exception);
+
+            if (!Core.IsInitialized())
             {
-                Connections.Remove(connectionId);
-                OculusLog($"OnServerDisconnected ({connectionId})");
-                OnDisconnected.Invoke(connectionId);
-            };
-            connection.Accept(msg.Data.ID);
-            Connections.Add(connectionId, connection);
-        }
-        else
-        {
-            OculusLogWarning($"Already a connection for this id ({connectionId})");
-        }
-    }
+                OculusLogError("Oculus platform not initialized.");
+            }
 
-    private void ConnectionStateChangedCallback(Message<NetworkingPeer> msg)
-    {
-        var connectionId = GetConnectionID(msg.Data.ID);
-        if (Connections.TryGetValue(connectionId, out var connection))
-        {
-            connection.ConnectionStateChange(msg);
-        }
-        else if (msg.Data.State == PeerConnectionState.Closed)
-        {
-            // Happens for example if you shut down a connection as a client and then start hosting
-            // quickly before the callback reports that it closed down.
-            OculusLog($"Unknown connection ({msg.Data.ID}) is now closed. This is most likely fine.");
-        }
-        else
-        {
-            OculusLogWarning($"Received a state change for connection not in connections ({connectionId}) ({msg.Data.ID}) ({msg.Data.State})");
-        }
-    }
-
-    public void Send(int connectionId, int channelId, ArraySegment<byte> segment)
-    {
-        if (Connections.TryGetValue(connectionId, out var connection))
-        {
-            connection.Send(channelId, segment);
-        }
-        else
-        {
-            OculusLogWarning("Could not find connection to send message to");
-        }
-    }
-
-    public void Disconnect(int connectionId)
-    {
-        if (Connections.TryGetValue(connectionId, out var connection))
-        {
-            connection.Disconnect();
-        }
-    }
-
-    public string GetClientAddress(int connectionId)
-    {
-        if (Connections.TryGetValue(connectionId, out var connection))
-        {
-            return connection.GetID();
+            return s;
         }
 
-        return "";
-    }
-
-    public void Stop()
-    {
-        _active = false;
-        if (Connections.Count > 0)
+        private void OnPeerConnectRequest(Message<NetworkingPeer> message)
         {
-            OculusLogWarning($"Did not disconnect ({Connections.Count}) connections before stopping");
-            Connections.Clear();
-        }
-    }
-
-    private void ProcessQueue()
-    {
-        if (_reliablePackets.Count > 0)
-        {
-            OculusLog($"{_reliablePackets.Count} reliable packets in queue");
-            var oldPackets = new List<Packet>();
-            foreach (var reliablePacket in _reliablePackets)
+            var oculusId = message.Data.ID;
+            if (_oculusIDToMirrorID.TryGetValue(oculusId, out int _))
             {
-                var connectionId = GetConnectionID(reliablePacket.SenderID);
-                var processed = false;
-
-                if (Connections.TryGetValue(connectionId, out var connection))
+                OculusLogError($"Incoming connection {oculusId} already exists");
+            }
+            else
+            {
+                if (_oculusIDToMirrorID.Count >= _maxConnections)
                 {
-                    if (connection.Connected)
-                    {
-                        connection.ProcessPacket(reliablePacket);
-                        processed = true;
-                    }
+                    OculusLog($"Incoming connection {oculusId} would exceed max connection count. Rejecting.");
                 }
                 else
                 {
-                    OculusLogWarning("Dropping packet for unknown connection");
-                    processed = true;
-                }
-
-                if (!processed)
-                {
-                    oldPackets.Add(reliablePacket);
+                    OculusLog($"Accept connection {oculusId}");
+                    Net.Accept(oculusId);
                 }
             }
-
-            _reliablePackets = oldPackets;
         }
-    }
 
-    public void TickIncoming()
-    {
-        if (_active)
+        private void OnConnectionStatusChanged(Message<NetworkingPeer> message)
         {
-            if (!_paused)
+            var oculusId = message.Data.ID;
+            switch (message.Data.State)
             {
-                ProcessQueue();
-            }
-
-            RawInput();
-        }
-    }
-
-    public void TickOutgoing()
-    {
-        if (_active && !_paused)
-        {
-            foreach (var connection in Connections.Values)
-            {
-                connection.TickOutgoing();
-            }
-        }
-    }
-
-    public void Pause()
-    {
-        _paused = true;
-    }
-
-    public void Unpause()
-    {
-        _paused = false;
-    }
-
-    private void ProcessPacket(Packet packet)
-    {
-        var connectionId = GetConnectionID(packet.SenderID);
-        if (Connections.TryGetValue(connectionId, out var connection))
-        {
-            connection.ProcessPacket(packet);
-        }
-        else
-        {
-            OculusLogWarning("Could not find connection to process packet");
-            packet.Dispose();
-        }
-    }
-
-    private bool ConnectedAndReady(ulong senderId)
-    {
-        var connectionId = GetConnectionID(senderId);
-        if (Connections.TryGetValue(connectionId, out var connection))
-        {
-            if (connection.Connected)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private void RawInput()
-    {
-        Packet packet;
-        while ((packet = Net.ReadPacket()) != null)
-        {
-            switch (packet.Policy)
-            {
-                case SendPolicy.Unreliable:
-                    if (!_paused && ConnectedAndReady(packet.SenderID))
-                    {
-                        ProcessPacket(packet);
-                    }
-                    else
-                    {
-                        packet.Dispose();
-                    }
+                case PeerConnectionState.Unknown:
+                    break;
+                case PeerConnectionState.Connected:
+                    int connectionId = _nextConnectionID++;
+                    _oculusIDToMirrorID.Add(oculusId, connectionId);
+                    OnConnected.Invoke(connectionId);
+                    OculusLog($"Client with OculusID {oculusId} connected. Assigning connection id {connectionId}");
 
                     break;
-                case SendPolicy.Reliable:
-                    if (!_paused && ConnectedAndReady(packet.SenderID))
+                case PeerConnectionState.Timeout:
+                    break;
+                case PeerConnectionState.Closed:
+                    if (_oculusIDToMirrorID.TryGetValue(oculusId, out int connId))
                     {
-                        ProcessPacket(packet);
-                    }
-                    else
-                    {
-                        _reliablePackets.Add(packet);
+                        InternalDisconnect(connId, oculusId);
                     }
 
                     break;
                 default:
-                    OculusLogWarning("Packet policy unknown, disposing");
-                    packet.Dispose();
-                    break;
+                    throw new ArgumentOutOfRangeException();
             }
         }
+
+        private void InternalDisconnect(int connId, ulong userId)
+        {
+            OnDisconnected.Invoke(connId);
+            _oculusIDToMirrorID.Remove(connId);
+            OculusLog($"Client with ConnectionID {connId} disconnected.");
+        }
+
+        public bool Disconnect(int connectionId)
+        {
+            if (_oculusIDToMirrorID.TryGetValue(connectionId, out ulong userId))
+            {
+                OculusLog($"Connection id {connectionId} disconnected.");
+                Net.Close(userId);
+                _oculusIDToMirrorID.Remove(connectionId);
+                return true;
+            }
+            else
+            {
+                OculusLogWarning("Trying to disconnect unknown connection id: " + connectionId);
+                return false;
+            }
+        }
+
+        public void FlushData() { }
+
+        public void ReceiveData()
+        {
+            Packet packet;
+            while ((packet = Net.ReadPacket()) != null)
+            {
+                int connId = _oculusIDToMirrorID[packet.SenderID];
+                (byte[] data, int ch) = ProcessPacket(packet);
+                OnReceivedData(connId, data, ch);
+            }
+        }
+
+        public void Send(int connectionId, byte[] data, int channelId)
+        {
+            if (_oculusIDToMirrorID.TryGetValue(connectionId, out ulong userId))
+            {
+                var sent = SendPacket(userId, data, channelId);
+
+                if (!sent)
+                {
+                    OculusLogError($"Could not send");
+                }
+            }
+            else
+            {
+                OculusLogError("Trying to send on unknown connection: " + connectionId);
+                OnReceivedError.Invoke(connectionId, new Exception("ERROR Unknown Connection"));
+            }
+        }
+
+        public string ServerGetClientAddress(int connectionId)
+        {
+            if (_oculusIDToMirrorID.TryGetValue(connectionId, out ulong userId))
+            {
+                return userId.ToString();
+            }
+            else
+            {
+                OculusLogError("Trying to get info on unknown connection: " + connectionId);
+                OnReceivedError.Invoke(connectionId, new Exception("ERROR Unknown Connection"));
+                return string.Empty;
+            }
+        }
+
+        public void Shutdown()
+        {
+            Net.SetPeerConnectRequestCallback(_ => { });
+            Net.SetConnectionStateChangedCallback(_ => { });
+            DisposeAllPackets();
+        }
+
+        #region Logging
+
+        private static void OculusLog(string msg)
+        {
+            Debug.Log("<color=orange>OculusServer: </color>: " + msg);
+        }
+
+        private static void OculusLogWarning(string msg)
+        {
+            Debug.LogWarning("<color=orange>OculusServer: </color>: " + msg);
+        }
+
+        private static void OculusLogError(string msg)
+        {
+            Debug.LogError("<color=orange>OculusServer: </color>: " + msg);
+        }
+
+        #endregion
     }
-
-    #region Logging
-
-    private void OculusLog(string msg)
-    {
-        Debug.Log("<color=orange>OculusServer: </color>: " + msg);
-    }
-
-    private void OculusLogWarning(string msg)
-    {
-        Debug.LogWarning("<color=orange>OculusServer: </color>: " + msg);
-    }
-
-    private void OculusLogError(string msg)
-    {
-        Debug.LogError("<color=orange>OculusServer: </color>: " + msg);
-    }
-
-    #endregion
 }

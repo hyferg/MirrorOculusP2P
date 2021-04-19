@@ -1,173 +1,241 @@
 ﻿using System;
 using Mirror;
-using Oculus.Platform.Samples.VrVoiceChat;
+using Oculus.Platform;
+using Oculus.Platform.Models;
 using UnityEngine;
 
-public class OculusTransport : Transport
+namespace Mirror.OculusP2P
 {
-    public NetworkManagerGame manager;
-    private OculusClient _client;
-    private bool _ready;
-    private OculusServer _server;
-
-    private void Awake()
+    public class OculusTransport : Transport
     {
-        manager.LoggedIn += user =>
+        private User _user;
+        private const string STEAM_SCHEME = "steam";
+
+        private static IClient client;
+        private static IServer server;
+
+        private float _lastPing;
+
+        public void Update()
         {
-            _client = new OculusClient
+            if (ClientActive())
             {
-                OnConnected = () => OnClientConnected.Invoke(),
-                OnData = (message, channelId) => { OnClientDataReceived.Invoke(message, channelId); },
-                OnDisconnected = () => OnClientDisconnected.Invoke()
-            };
-            _server = new OculusServer
+                if (Time.realtimeSinceStartup - _lastPing > 0.3)
+                {
+                    _lastPing = Time.realtimeSinceStartup;
+                    client.Ping();
+                }
+            }
+        }
+
+        public void LoggedIn(User user)
+        {
+            _user = user;
+        }
+
+        public override void ClientEarlyUpdate()
+        {
+            if (enabled)
             {
-                OnConnected = connectionId => { OnServerConnected.Invoke(connectionId); },
-                OnData = (connectionId, message, channelId) => { OnServerDataReceived.Invoke(connectionId, message, channelId); },
-                OnDisconnected = connectionId => { OnServerDisconnected.Invoke(connectionId); }
-            };
-
-            _ready = true;
-        };
-    }
-
-    private void OnEnable()
-    {
-        _client?.Unpause();
-        _server?.Unpause();
-    }
-
-    private void OnDisable()
-    {
-        _client?.Pause();
-        _server?.Pause();
-    }
-
-    public override bool Available()
-    {
-        return Application.platform == RuntimePlatform.Android || Application.platform == RuntimePlatform.WindowsEditor ||
-               Application.platform == RuntimePlatform.WindowsPlayer;
-    }
-
-    public override bool ClientConnected()
-    {
-        return _client.Connected;
-    }
-
-    public override void ClientConnect(string address)
-    {
-        _client.Connect(address);
-    }
-
-    public override void ClientSend(int channelId, ArraySegment<byte> segment)
-    {
-        _client.Send(channelId, segment);
-    }
-
-    public override void ClientDisconnect()
-    {
-        _client.Disconnect();
-    }
-
-    public override void ClientEarlyUpdate()
-    {
-        if (enabled && _ready)
-        {
-            _client.TickIncoming();
+                client?.ReceiveData();
+            }
         }
-    }
 
-    public override void ClientLateUpdate()
-    {
-        if (_ready)
+        public override void ServerEarlyUpdate()
         {
-            _client.TickOutgoing();
+            if (enabled)
+            {
+                server?.ReceiveData();
+            }
         }
-    }
 
-    public override Uri ServerUri()
-    {
-        return new Uri(PlatformManager.MyID.ToString());
-    }
-
-    public override bool ServerActive()
-    {
-        return _server.IsActive();
-    }
-
-    public override void ServerStart()
-    {
-        _server.Start();
-    }
-
-    public override void ServerSend(int connectionId, int channelId, ArraySegment<byte> segment)
-    {
-        _server.Send(connectionId, channelId, segment);
-    }
-
-    public override bool ServerDisconnect(int connectionId)
-    {
-        _server.Disconnect(connectionId);
-        return true;
-    }
-
-    public override string ServerGetClientAddress(int connectionId)
-    {
-        return _server.GetClientAddress(connectionId);
-    }
-
-    public override void ServerStop()
-    {
-        _server.Stop();
-    }
-
-    public override void ServerEarlyUpdate()
-    {
-        if (enabled && _ready)
+        public override void ClientLateUpdate()
         {
-            _server.TickIncoming();
+            if (enabled)
+            {
+                client?.FlushData();
+            }
         }
-    }
 
-    public override void ServerLateUpdate()
-    {
-        if (_ready)
+        public override void ServerLateUpdate()
         {
-            _server.TickOutgoing();
+            if (enabled)
+            {
+                server?.FlushData();
+            }
         }
-    }
 
-    public override int GetMaxPacketSize(int channelId = Channels.Reliable)
-    {
-        switch (channelId)
+        public override bool ClientConnected() => ClientActive() && client.Connected;
+
+        public override void ClientConnect(string address)
         {
-            case Channels.Unreliable:
-                return OculusPeer.UnreliableMaxMessageSize;
-            default:
-                return OculusPeer.ReliableMaxMessageSize;
+            if (!Core.IsInitialized())
+            {
+                Debug.LogError("SteamWorks not initialized. Client could not be started.");
+                OnClientDisconnected.Invoke();
+                return;
+            }
+
+            if (ServerActive())
+            {
+                Debug.LogError("Transport already running as server!");
+                return;
+            }
+
+            if (!ClientActive() || client.Error)
+            {
+                Debug.Log($"Starting client [SteamSockets], target address {address}.");
+                client = OculusClient.CreateClient(this, address);
+            }
+            else
+            {
+                Debug.LogError("Client already running!");
+            }
         }
+
+        public override void ClientConnect(Uri uri)
+        {
+            if (uri.Scheme != STEAM_SCHEME)
+                throw new ArgumentException($"Invalid url {uri}, use {STEAM_SCHEME}://SteamID instead", nameof(uri));
+
+            ClientConnect(uri.Host);
+        }
+
+        public override void ClientSend(int channelId, ArraySegment<byte> segment)
+        {
+            byte[] data = new byte[segment.Count];
+            Array.Copy(segment.Array, segment.Offset, data, 0, segment.Count);
+            client.Send(data, channelId);
+        }
+
+        public override void ClientDisconnect()
+        {
+            if (ClientActive())
+            {
+                Shutdown();
+            }
+        }
+
+        public bool ClientActive() => client != null;
+
+        public override bool ServerActive() => server != null;
+
+        public override void ServerStart()
+        {
+            if (!Core.IsInitialized())
+            {
+                Debug.LogError("SteamWorks not initialized. Server could not be started.");
+                return;
+            }
+
+            if (ClientActive())
+            {
+                Debug.LogError("Transport already running as client!");
+                return;
+            }
+
+            if (!ServerActive())
+            {
+                Debug.Log($"Starting server [SteamSockets].");
+                server = OculusServer.CreateServer(this, NetworkManager.singleton.maxConnections);
+            }
+            else
+            {
+                Debug.LogError("Server already started!");
+            }
+        }
+
+        public override Uri ServerUri()
+        {
+            return new Uri(_user.ID.ToString());
+        }
+
+        public override void ServerSend(int connectionId, int channelId, ArraySegment<byte> segment)
+        {
+            if (ServerActive())
+            {
+                byte[] data = new byte[segment.Count];
+                Array.Copy(segment.Array, segment.Offset, data, 0, segment.Count);
+                server.Send(connectionId, data, channelId);
+            }
+        }
+
+        public override bool ServerDisconnect(int connectionId) => ServerActive() && server.Disconnect(connectionId);
+        public override string ServerGetClientAddress(int connectionId) => ServerActive() ? server.ServerGetClientAddress(connectionId) : string.Empty;
+
+        public override void ServerStop()
+        {
+            if (ServerActive())
+            {
+                Shutdown();
+            }
+        }
+
+        public override void Shutdown()
+        {
+            if (server != null)
+            {
+                server.Shutdown();
+                server = null;
+                Debug.Log("Transport shut down - was server.");
+            }
+
+            if (client != null)
+            {
+                client.Disconnect();
+                client = null;
+                Debug.Log("Transport shut down - was client.");
+            }
+        }
+
+        public override int GetMaxPacketSize(int channelId)
+        {
+            switch (channelId)
+            {
+                case Mirror.Channels.Reliable:
+                    return OculusCommon.ReliableMaxMessageSize;
+                case Mirror.Channels.Unreliable:
+                    return OculusCommon.UnreliableMaxMessageSize;
+                default:
+                    OculusLogWarning("Unknown channel");
+                    return OculusCommon.UnreliableMaxMessageSize;
+            }
+        }
+
+        public override bool Available()
+        {
+            try
+            {
+                return (Core.IsInitialized() && _user != null);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            Shutdown();
+        }
+
+        #region Logging
+
+        private void OculusLog(string msg)
+        {
+            Debug.Log("<color=orange>OculusTransport: </color>: " + msg);
+        }
+
+        private void OculusLogWarning(string msg)
+        {
+            Debug.LogWarning("<color=orange>OculusTransport: </color>: " + msg);
+        }
+
+        private void OculusLogError(string msg)
+        {
+            Debug.LogError("<color=orange>OculusTransport: </color>: " + msg);
+        }
+
+        #endregion
     }
-
-    //public override int GetMaxBatchSize(int channelId)
-
-    public override void Shutdown() { }
-
-    #region Logging
-
-    private void OculusLog(string msg)
-    {
-        Debug.Log("<color=green>OculusTransport: </color>: " + msg);
-    }
-
-    private void OculusLogWarning(string msg)
-    {
-        Debug.LogWarning("<color=green>OculusTransport: </color>: " + msg);
-    }
-
-    private void OculusLogError(string msg)
-    {
-        Debug.LogError("<color=green>OculusTransport: </color>: " + msg);
-    }
-
-    #endregion
 }
