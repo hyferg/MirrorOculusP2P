@@ -99,15 +99,13 @@ namespace Mirror.OculusP2P
                 case PeerConnectionState.Timeout:
                     break;
                 case PeerConnectionState.Closed:
-                    Disconnect();
+                    InternalDisconnect();
                     break;
             }
         }
 
         public void Disconnect()
         {
-            Dispose();
-
             if (Net.IsConnected(HostID))
             {
                 OculusLog("Sending Disconnect message");
@@ -123,10 +121,10 @@ namespace Mirror.OculusP2P
 
         private void InternalDisconnect()
         {
+            Dispose();
             Connected = false;
             OnDisconnected.Invoke();
             OculusLog("Disconnected.");
-            Net.Close(HostID);
         }
 
         public void ReceiveData()

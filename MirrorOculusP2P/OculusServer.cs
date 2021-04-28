@@ -93,18 +93,24 @@ namespace Mirror.OculusP2P
 
         private void InternalDisconnect(int connId, ulong userId)
         {
-            OnDisconnected.Invoke(connId);
-            _oculusIDToMirrorID.Remove(connId);
-            OculusLog($"Client with ConnectionID {connId} disconnected.");
+            if (_oculusIDToMirrorID.TryGetValue(userId, out int _))
+            {
+                _oculusIDToMirrorID.Remove(connId);
+                OnDisconnected.Invoke(connId);
+            }
+            else
+            {
+                OculusLogWarning($"Nothing to disconnect");
+            }
         }
 
         public bool Disconnect(int connectionId)
         {
             if (_oculusIDToMirrorID.TryGetValue(connectionId, out ulong userId))
             {
-                OculusLog($"Connection id {connectionId} disconnected.");
+                OculusLog($"Closing connection {connectionId}");
                 Net.Close(userId);
-                _oculusIDToMirrorID.Remove(connectionId);
+                //_oculusIDToMirrorID.Remove(connectionId);
                 return true;
             }
             else
