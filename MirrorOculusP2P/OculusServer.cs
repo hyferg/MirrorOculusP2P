@@ -121,9 +121,16 @@ namespace Mirror.OculusP2P
             Packet packet;
             while ((packet = Net.ReadPacket()) != null)
             {
-                int connId = _oculusIDToMirrorID[packet.SenderID];
-                (byte[] data, int ch) = ProcessPacket(packet);
-                OnReceivedData(connId, data, ch);
+                if (_oculusIDToMirrorID.TryGetValue(packet.SenderID, out int connId))
+                {
+                    (byte[] data, int ch) = ProcessPacket(packet);
+                    OnReceivedData(connId, data, ch);
+                }
+                else
+                {
+                    Debug.LogWarning("Ignoring packet from sender not in dictionary");
+                }
+                
             }
         }
 

@@ -18,36 +18,14 @@ namespace Mirror.OculusP2P
             _user = user;
         }
 
-        public override void ClientEarlyUpdate()
+        public void LateUpdate()
         {
-            if (enabled)
+            if (!enabled)
             {
-                client?.ReceiveData();
+                return;
             }
-        }
-
-        public override void ServerEarlyUpdate()
-        {
-            if (enabled)
-            {
-                server?.ReceiveData();
-            }
-        }
-
-        public override void ClientLateUpdate()
-        {
-            if (enabled)
-            {
-                client?.FlushData();
-            }
-        }
-
-        public override void ServerLateUpdate()
-        {
-            if (enabled)
-            {
-                server?.FlushData();
-            }
+            client?.ReceiveData();
+            server?.ReceiveData();
         }
 
         public override bool ClientConnected() => ClientActive() && client.Connected;
@@ -82,6 +60,8 @@ namespace Mirror.OculusP2P
         {
             byte[] data = new byte[segment.Count];
             Array.Copy(segment.Array, segment.Offset, data, 0, segment.Count);
+            
+            // todo: can this be null?
             client.Send(data, channelId);
         }
 
@@ -169,9 +149,9 @@ namespace Mirror.OculusP2P
         {
             switch (channelId)
             {
-                case Mirror.Channels.Reliable:
+                case Mirror.Channels.DefaultReliable:
                     return OculusCommon.ReliableMaxMessageSize;
-                case Mirror.Channels.Unreliable:
+                case Mirror.Channels.DefaultUnreliable:
                     return OculusCommon.UnreliableMaxMessageSize;
                 default:
                     OculusLogWarning("Unknown channel");
