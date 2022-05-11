@@ -45,7 +45,7 @@ namespace Mirror.OculusP2P
                 return;
             }
 
-            if (!ClientActive() || client.Error)
+            if (client == null && (!ClientActive() || client.Error))
             {
                 Debug.Log($"Starting client [Oculus], target address {address}.");
                 client = OculusClient.CreateClient(this, address);
@@ -56,7 +56,7 @@ namespace Mirror.OculusP2P
             }
         }
 
-        public override void ClientSend(int channelId, ArraySegment<byte> segment)
+        public override void ClientSend(ArraySegment<byte> segment, int channelId)
         {
             byte[] data = new byte[segment.Count];
             Array.Copy(segment.Array, segment.Offset, data, 0, segment.Count);
@@ -104,10 +104,11 @@ namespace Mirror.OculusP2P
 
         public override Uri ServerUri()
         {
-            return new Uri(_user.ID.ToString());
+            return new Uri(_user.ID.ToString
+                ());
         }
 
-        public override void ServerSend(int connectionId, int channelId, ArraySegment<byte> segment)
+        public override void ServerSend(int connectionId, ArraySegment<byte> segment, int channelId)
         {
             if (ServerActive())
             {
@@ -117,8 +118,10 @@ namespace Mirror.OculusP2P
             }
         }
 
-        public override bool ServerDisconnect(int connectionId) => ServerActive() && server.Disconnect(connectionId);
-        
+        //public override bool ServerDisconnect(int connectionId) => ServerActive() && server.Disconnect(connectionId);
+        public override void ServerDisconnect(int connectionId)  => server.Disconnect(connectionId);
+
+
         public override string ServerGetClientAddress(int connectionId) => ServerActive() ? server.ServerGetClientAddress(connectionId) : string.Empty;
 
         public override void ServerStop()
@@ -150,9 +153,9 @@ namespace Mirror.OculusP2P
         {
             switch (channelId)
             {
-                case Mirror.Channels.DefaultReliable:
+                case Mirror.Channels.Reliable:
                     return OculusCommon.ReliableMaxMessageSize;
-                case Mirror.Channels.DefaultUnreliable:
+                case Mirror.Channels.Unreliable:
                     return OculusCommon.UnreliableMaxMessageSize;
                 default:
                     OculusLogWarning("Unknown channel");

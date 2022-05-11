@@ -23,9 +23,9 @@ namespace Mirror.OculusP2P
         {
             switch (channelId)
             {
-                case Channels.DefaultReliable:
+                case Channels.Reliable:
                     return Net.SendPacket(userId, data, SendPolicy.Reliable);
-                case Channels.DefaultUnreliable:
+                case Channels.Unreliable:
                     return Net.SendPacket(userId, data, SendPolicy.Unreliable);
                 default:
                     OculusLogError("Unknown send policy. Defaulting to reliable.");
@@ -39,13 +39,13 @@ namespace Mirror.OculusP2P
             switch (packet.Policy)
             {
                 case SendPolicy.Unreliable:
-                    channel = Channels.DefaultUnreliable;
+                    channel = Channels.Unreliable;
                     break;
                 case SendPolicy.Reliable:
-                    channel = Channels.DefaultReliable;
+                    channel = Channels.Reliable;
                     break;
                 default:
-                    channel = Channels.DefaultReliable;
+                    channel = Channels.Reliable;
                     OculusLogWarning("Unknown packet policy, defaulting to reliable");
                     break;
             }
