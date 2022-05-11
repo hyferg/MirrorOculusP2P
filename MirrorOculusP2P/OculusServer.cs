@@ -61,11 +61,14 @@ namespace Mirror.OculusP2P
                     Net.Accept(oculusId);
                 }
             }
+
+            Net.Accept(oculusId);
         }
 
         private void OnConnectionStatusChanged(Message<NetworkingPeer> message)
         {
             var oculusId = message.Data.ID;
+
             switch (message.Data.State)
             {
                 case PeerConnectionState.Unknown:
@@ -78,6 +81,7 @@ namespace Mirror.OculusP2P
 
                     break;
                 case PeerConnectionState.Timeout:
+                    Net.Connect(oculusId);
                     break;
                 case PeerConnectionState.Closed:
                     if (_oculusIDToMirrorID.TryGetValue(oculusId, out int connId))

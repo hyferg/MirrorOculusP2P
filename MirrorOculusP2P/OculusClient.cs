@@ -97,6 +97,7 @@ namespace Mirror.OculusP2P
 
                     break;
                 case PeerConnectionState.Timeout:
+                    Net.Connect(message.Data.ID);
                     break;
                 case PeerConnectionState.Closed:
                     InternalDisconnect();
